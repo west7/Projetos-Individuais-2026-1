@@ -1,0 +1,54 @@
+# Evidências de execução
+
+As evidências abaixo foram geradas localmente com os PDFs catalogados e com `GEMINI_API_KEY` configurada no `.env`.
+
+## Processamento com Gemini
+
+```text
+~/dev/Projetos-Individuais-2026-1/guilherme-westphall/projeto-4 main* ⇡
+> python -m src.cli process --extractor gemini --company all --limit 2
+Processamento concluido: 2 documentos, 6 metricas, 0 parseados sob demanda, 0 falharam.
+```
+
+## Métricas via CLI
+
+```text
+~/dev/Projetos-Individuais-2026-1/guilherme-westphall/projeto-4 main* ⇡
+> python -m src.cli list-metrics
+MRV | 1T26 | lancamentos | None R$ milhões | gemini-2.5-flash
+MRV | 1T26 | vendas | None R$ milhões | gemini-2.5-flash
+Pacaembu | 1T26 | lancamentos | 4279.0 unidades | gemini-2.5-flash
+Pacaembu | 1T26 | lancamentos | 856.4 R$ milhões | gemini-2.5-flash
+Pacaembu | 1T26 | vendas | 4302.0 unidades | gemini-2.5-flash
+Pacaembu | 1T26 | vendas | 867.1 R$ milhões | gemini-2.5-flash
+```
+
+## Consulta SQLite
+
+```text
+~/dev/Projetos-Individuais-2026-1/guilherme-westphall/projeto-4 main* ⇡
+> sqlite3 data/catalog.db
+SQLite version 3.50.2 2025-06-28 14:00:48
+Enter ".help" for usage hints.
+sqlite> .headers on
+sqlite> .mode column
+sqlite> SELECT company, year, quarter, metric_name, value, unit, confidence, extractor_name
+  FROM metrics
+  ORDER BY company, metric_name, unit;
+company   year  quarter  metric_name  value   unit        confidence  extractor_name  
+--------  ----  -------  -----------  ------  ----------  ----------  ----------------
+MRV       2026  1        lancamentos          R$ milhões  low         gemini-2.5-flash
+MRV       2026  1        vendas               R$ milhões  low         gemini-2.5-flash
+Pacaembu  2026  1        lancamentos  856.4   R$ milhões  high        gemini-2.5-flash
+Pacaembu  2026  1        lancamentos  4279.0  unidades    high        gemini-2.5-flash
+Pacaembu  2026  1        vendas       867.1   R$ milhões  high        gemini-2.5-flash
+Pacaembu  2026  1        vendas       4302.0  unidades    high        gemini-2.5-flash
+sqlite> 
+```
+
+## Interpretação
+
+- O pipeline processou 2 documentos com Gemini.
+- Foram persistidas 6 métricas no SQLite.
+- Pacaembu retornou valores absolutos em unidades e R$ milhões.
+- MRV retornou `NULL` para os valores, com baixa confiança, preservando a regra de não inventar dados quando o valor absoluto não está claro.
