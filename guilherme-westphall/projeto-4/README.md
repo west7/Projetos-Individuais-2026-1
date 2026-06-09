@@ -14,7 +14,9 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python -m src.cli ingest --company all
+python -m src.cli process-mock --company all
 python -m src.cli list-documents
+python -m src.cli list-metrics
 ```
 
 Tambem e possivel processar uma empresa especifica:
@@ -42,6 +44,17 @@ python -m src.cli ingest --company pacaembu --limit 2
 8. Registra no catalogo SQLite com URL, empresa, trimestre, ano e caminho local.
 9. Ignora documentos ja processados.
 
+## Mock de LLM
+
+Antes de integrar uma API real de LLM, o comando abaixo simula a extracao de metricas e grava os resultados no catalogo:
+
+```bash
+python -m src.cli process-mock --company all
+python -m src.cli list-metrics
+```
+
+O mock gera metricas deterministicas para `lancamentos` e `vendas`. Os valores nao devem ser usados como resultado real; eles servem para validar o contrato, a persistencia e o fluxo de processamento.
+
 ## Catalogo de dados
 
 O banco fica em `data/catalog.db` e possui a tabela `documents` com:
@@ -55,6 +68,17 @@ O banco fica em `data/catalog.db` e possui a tabela `documents` com:
 - caminho local;
 - status;
 - datas de descoberta e download.
+
+A tabela `metrics` armazena:
+
+- documento de origem;
+- empresa, ano e trimestre;
+- nome da metrica;
+- valor;
+- unidade;
+- confianca;
+- extrator usado;
+- data de extracao.
 
 ## Limitacoes
 

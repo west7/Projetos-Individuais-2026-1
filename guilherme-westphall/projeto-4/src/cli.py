@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .catalog import Catalog
 from .ingest import ingest_sources
+from .process import process_documents
 from .sources import selected_sources
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -22,6 +23,14 @@ def main() -> None:
 
     list_parser = subparsers.add_parser("list-documents", help="Lista documentos catalogados.")
     list_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+
+    process_parser = subparsers.add_parser("process-mock", help="Simula extracao via LLM e salva metricas.")
+    process_parser.add_argument("--company", choices=["all", "mrv", "pacaembu"], default="all")
+    process_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    process_parser.add_argument("--limit", type=int, default=None)
+
+    metrics_parser = subparsers.add_parser("list-metrics", help="Lista metricas extraidas.")
+    metrics_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
 
     args = parser.parse_args()
 
@@ -50,6 +59,33 @@ def main() -> None:
         for row in rows:
             period = _format_period(row["year"], row["quarter"])
             print(f"{row['company']} | {period} | {row['status']} | {row['document_title']}")
+
+    if args.command == "process-mock":
+        company = None if args.company == "all" else args.company
+        stats = process_documents(args.db, company=company, limit=args.limit)
+        print(
+            "Processamento mock concluido: "
+            f"{stats['documents']} documentos, {stats['metrics']} metricas."
+        )
+        return
+
+    if args.command == "list-metrics":
+        catalog = Catalog(args.db)
+        try:
+            rows = catalog.list_metrics()
+        finally:
+            catalog.close()
+
+        if not rows:
+            print("Nenhuma metrica extraida.")
+            return
+
+        for row in rows:
+            period = _format_period(row["year"], row["quarter"])
+            print(
+                f"{row['company']} | {period} | {row['metric_name']} | "
+                f"{row['value']} {row['unit']} | {row['extractor_name']}"
+            )
 
 
 def _format_period(year: int | None, quarter: int | None) -> str:

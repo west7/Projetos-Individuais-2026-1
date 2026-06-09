@@ -2,7 +2,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import DocumentCandidate, DownloadedDocument
+from .models import DocumentCandidate, DownloadedDocument, ExtractionResult
 
 
 SCHEMA = """
@@ -23,6 +23,24 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 """
 
+METRICS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    company TEXT NOT NULL,
+    year INTEGER,
+    quarter INTEGER,
+    metric_name TEXT NOT NULL,
+    value REAL,
+    unit TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    evidence TEXT,
+    extractor_name TEXT NOT NULL,
+    extracted_at TEXT NOT NULL,
+    FOREIGN KEY(document_id) REFERENCES documents(id)
+);
+"""
+
 class Catalog:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -30,6 +48,7 @@ class Catalog:
         self.connection = sqlite3.connect(self.db_path)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute(SCHEMA)
+        self.connection.execute(METRICS_SCHEMA)
         self.connection.commit()
 
     def close(self) -> None:
@@ -115,9 +134,72 @@ class Catalog:
     def list_documents(self) -> list[sqlite3.Row]:
         return self.connection.execute(
             """
-            SELECT company, year, quarter, status, document_title, document_url, local_path, sha256
+            SELECT id, company, year, quarter, status, document_title, document_url, local_path, sha256
             FROM documents
             ORDER BY company, year DESC, quarter DESC, document_title
+            """
+        ).fetchall()
+
+    def documents_ready_for_extraction(self, company: str | None = None) -> list[sqlite3.Row]:
+        params: tuple[str, ...] = ()
+        company_filter = ""
+        if company:
+            company_filter = "AND lower(company) = lower(?)"
+            params = (company,)
+
+        return self.connection.execute(
+            f"""
+            SELECT id, company, year, quarter, document_title, document_url, local_path
+            FROM documents
+            WHERE status IN ('downloaded', 'extracted_mock')
+              AND local_path IS NOT NULL
+              {company_filter}
+            ORDER BY company, year DESC, quarter DESC, document_title
+            """,
+            params,
+        ).fetchall()
+
+    def register_extraction(self, document_id: int, result: ExtractionResult) -> int:
+        now = _now()
+        self.connection.execute("DELETE FROM metrics WHERE document_id = ?", (document_id,))
+
+        for metric in result.metrics:
+            self.connection.execute(
+                """
+                INSERT INTO metrics (
+                    document_id, company, year, quarter, metric_name, value, unit,
+                    confidence, evidence, extractor_name, extracted_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    document_id,
+                    result.company,
+                    result.year,
+                    result.quarter,
+                    metric.metric_name,
+                    metric.value,
+                    metric.unit,
+                    metric.confidence,
+                    metric.evidence,
+                    result.extractor_name,
+                    now,
+                ),
+            )
+
+        self.connection.execute(
+            "UPDATE documents SET status = ? WHERE id = ?",
+            ("extracted_mock", document_id),
+        )
+        self.connection.commit()
+        return len(result.metrics)
+
+    def list_metrics(self) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT company, year, quarter, metric_name, value, unit, confidence, extractor_name
+            FROM metrics
+            ORDER BY company, year DESC, quarter DESC, metric_name
             """
         ).fetchall()
 

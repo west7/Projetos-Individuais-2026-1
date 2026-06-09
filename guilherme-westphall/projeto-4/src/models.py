@@ -18,3 +18,21 @@ class DownloadedDocument:
     content: bytes
     sha256: str
     local_path: str
+
+
+@dataclass(frozen=True)
+class ExtractedMetric:
+    metric_name: str
+    value: float | None
+    unit: str
+    confidence: str
+    evidence: str | None = None
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    company: str
+    year: int | None
+    quarter: int | None
+    metrics: list[ExtractedMetric]
+    extractor_name: str
