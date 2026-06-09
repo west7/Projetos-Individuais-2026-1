@@ -2,7 +2,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import DocumentCandidate, DownloadedDocument, ExtractionResult
+from .models import DocumentCandidate, DownloadedDocument, ExtractionResult, ParsedDocumentText
 
 
 SCHEMA = """
@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 """
 
+DOCUMENT_TEXTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS document_texts (
+    document_id INTEGER PRIMARY KEY,
+    page_count INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    parsed_at TEXT NOT NULL,
+    FOREIGN KEY(document_id) REFERENCES documents(id)
+);
+"""
+
+
 class Catalog:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -49,6 +60,7 @@ class Catalog:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute(SCHEMA)
         self.connection.execute(METRICS_SCHEMA)
+        self.connection.execute(DOCUMENT_TEXTS_SCHEMA)
         self.connection.commit()
 
     def close(self) -> None:
@@ -151,7 +163,7 @@ class Catalog:
             f"""
             SELECT id, company, year, quarter, document_title, document_url, local_path
             FROM documents
-            WHERE status IN ('downloaded', 'extracted_mock')
+            WHERE status IN ('downloaded', 'parsed', 'extracted_mock', 'extracted_gemini')
               AND local_path IS NOT NULL
               {company_filter}
             ORDER BY company, year DESC, quarter DESC, document_title
@@ -159,7 +171,55 @@ class Catalog:
             params,
         ).fetchall()
 
-    def register_extraction(self, document_id: int, result: ExtractionResult) -> int:
+    def register_document_text(self, parsed_text: ParsedDocumentText) -> None:
+        now = _now()
+        self.connection.execute(
+            """
+            INSERT INTO document_texts (document_id, page_count, text, parsed_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(document_id) DO UPDATE SET
+                page_count = excluded.page_count,
+                text = excluded.text,
+                parsed_at = excluded.parsed_at
+            """,
+            (parsed_text.document_id, parsed_text.page_count, parsed_text.text, now),
+        )
+        self.connection.execute(
+            "UPDATE documents SET status = ? WHERE id = ? AND status = ?",
+            ("parsed", parsed_text.document_id, "downloaded"),
+        )
+        self.connection.commit()
+
+    def get_document_text(self, document_id: int) -> sqlite3.Row | None:
+        return self.connection.execute(
+            """
+            SELECT document_id, page_count, text, parsed_at
+            FROM document_texts
+            WHERE document_id = ?
+            """,
+            (document_id,),
+        ).fetchone()
+
+    def documents_ready_for_parsing(self, company: str | None = None) -> list[sqlite3.Row]:
+        params: tuple[str, ...] = ()
+        company_filter = ""
+        if company:
+            company_filter = "AND lower(company) = lower(?)"
+            params = (company,)
+
+        return self.connection.execute(
+            f"""
+            SELECT id, company, year, quarter, document_title, document_url, local_path
+            FROM documents
+            WHERE status IN ('downloaded', 'parsed', 'extracted_mock', 'extracted_gemini')
+              AND local_path IS NOT NULL
+              {company_filter}
+            ORDER BY company, year DESC, quarter DESC, document_title
+            """,
+            params,
+        ).fetchall()
+
+    def register_extraction(self, document_id: int, result: ExtractionResult, status: str | None = None) -> int:
         now = _now()
         self.connection.execute("DELETE FROM metrics WHERE document_id = ?", (document_id,))
 
@@ -187,9 +247,10 @@ class Catalog:
                 ),
             )
 
+        extraction_status = status or _status_for_extractor(result.extractor_name)
         self.connection.execute(
             "UPDATE documents SET status = ? WHERE id = ?",
-            ("extracted_mock", document_id),
+            (extraction_status, document_id),
         )
         self.connection.commit()
         return len(result.metrics)
@@ -206,3 +267,9 @@ class Catalog:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _status_for_extractor(extractor_name: str) -> str:
+    if "gemini" in extractor_name:
+        return "extracted_gemini"
+    return "extracted_mock"

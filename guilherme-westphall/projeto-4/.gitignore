@@ -2,3 +2,4 @@ data/catalog.db
 data/pdfs/*.pdf
 __pycache__/
 .pytest_cache/
+.env

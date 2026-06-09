@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .catalog import Catalog
 from .ingest import ingest_sources
+from .parsing import parse_documents
 from .process import process_documents
 from .sources import selected_sources
 
@@ -24,10 +25,21 @@ def main() -> None:
     list_parser = subparsers.add_parser("list-documents", help="Lista documentos catalogados.")
     list_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
 
+    parse_parser = subparsers.add_parser("parse-documents", help="Extrai texto dos PDFs catalogados.")
+    parse_parser.add_argument("--company", choices=["all", "mrv", "pacaembu"], default="all")
+    parse_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parse_parser.add_argument("--limit", type=int, default=None)
+
     process_parser = subparsers.add_parser("process-mock", help="Simula extracao via LLM e salva metricas.")
     process_parser.add_argument("--company", choices=["all", "mrv", "pacaembu"], default="all")
     process_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     process_parser.add_argument("--limit", type=int, default=None)
+
+    process_real_parser = subparsers.add_parser("process", help="Processa documentos com mock ou Gemini.")
+    process_real_parser.add_argument("--extractor", choices=["mock", "gemini"], default="mock")
+    process_real_parser.add_argument("--company", choices=["all", "mrv", "pacaembu"], default="all")
+    process_real_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    process_real_parser.add_argument("--limit", type=int, default=None)
 
     metrics_parser = subparsers.add_parser("list-metrics", help="Lista metricas extraidas.")
     metrics_parser.add_argument("--db", type=Path, default=DEFAULT_DB)
@@ -60,12 +72,33 @@ def main() -> None:
             period = _format_period(row["year"], row["quarter"])
             print(f"{row['company']} | {period} | {row['status']} | {row['document_title']}")
 
+    if args.command == "parse-documents":
+        company = None if args.company == "all" else args.company
+        stats = parse_documents(args.db, company=company, limit=args.limit)
+        print(
+            "Parsing concluido: "
+            f"{stats['documents']} documentos parseados, {stats['failed']} falharam."
+        )
+        return
+
     if args.command == "process-mock":
         company = None if args.company == "all" else args.company
-        stats = process_documents(args.db, company=company, limit=args.limit)
+        stats = process_documents(args.db, company=company, limit=args.limit, extractor_name="mock")
         print(
             "Processamento mock concluido: "
-            f"{stats['documents']} documentos, {stats['metrics']} metricas."
+            f"{stats['documents']} documentos, {stats['metrics']} metricas, {stats['failed']} falharam."
+        )
+        return
+
+    if args.command == "process":
+        company = None if args.company == "all" else args.company
+        stats = process_documents(args.db, company=company, limit=args.limit, extractor_name=args.extractor)
+        print(
+            "Processamento concluido: "
+            f"{stats['documents']} documentos, "
+            f"{stats['metrics']} metricas, "
+            f"{stats['parsed']} parseados sob demanda, "
+            f"{stats['failed']} falharam."
         )
         return
 

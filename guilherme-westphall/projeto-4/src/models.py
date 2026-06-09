@@ -21,6 +21,13 @@ class DownloadedDocument:
 
 
 @dataclass(frozen=True)
+class ParsedDocumentText:
+    document_id: int
+    page_count: int
+    text: str
+
+
+@dataclass(frozen=True)
 class ExtractedMetric:
     metric_name: str
     value: float | None
